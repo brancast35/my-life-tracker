@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import useLocalStorage from "../hooks/useLocalStorage";
 
 const CLAVES_DATOS = ["habitos", "objetivos", "movimientos", "rutinas", "historialEntrenamiento"];
 
 function Configuracion() {
+  const { usuario, cerrarSesion } = useAuth();
   const [nombreUsuario, setNombreUsuario] = useLocalStorage("nombreUsuario", "");
   const [moneda, setMoneda] = useLocalStorage("monedaPreferida", "S/");
   const [mensaje, setMensaje] = useState("");
@@ -162,7 +164,19 @@ function Configuracion() {
           </div>
         )}
       </div>
-    </div>
+            <div className="bg-white p-4 rounded-lg border border-slate-200 mt-4">
+        <p className="font-semibold text-slate-700 mb-1">Sesión</p>
+        <p className="text-xs text-slate-400 mb-3">
+          Conectado como: {usuario?.email}
+        </p>
+        <button
+          onClick={cerrarSesion}
+          className="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-200 transition-colors font-medium"
+        >
+          Cerrar sesión
+        </button>
+      </div>
+        </div>
   );
 }
 

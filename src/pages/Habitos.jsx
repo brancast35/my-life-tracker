@@ -1,5 +1,6 @@
-import { useState } from "react";
-import useLocalStorage from "../hooks/useLocalStorage";
+import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext";
 
 function obtenerFechaHoy() {
   return new Date().toISOString().split("T")[0];
@@ -7,7 +8,7 @@ function obtenerFechaHoy() {
 
 function obtenerFechasSemanaActual() {
   const hoy = new Date();
-  const diaSemana = hoy.getDay(); // 0 = domingo, 1 = lunes...
+  const diaSemana = hoy.getDay();
   const offset = diaSemana === 0 ? -6 : 1 - diaSemana;
   const lunes = new Date(hoy);
   lunes.setDate(hoy.getDate() + offset);
@@ -33,7 +34,6 @@ function obtenerUltimosNDias(n) {
 
 function calcularRacha(fechasCompletado) {
   if (fechasCompletado.length === 0) return 0;
-
   const fechasOrdenadas = [...fechasCompletado].sort().reverse();
   let racha = 0;
   let fechaEsperada = new Date();
@@ -47,12 +47,13 @@ function calcularRacha(fechasCompletado) {
       break;
     }
   }
-
   return racha;
 }
 
 function Habitos() {
-  const [habitos, setHabitos] = useLocalStorage("habitos", []);
+  const { usuario } = useAuth();
+  const [habitos, setHabitos] = useState([]);
+  const [cargando, setCargando] = useState(true);
   const [nombreNuevo, setNombreNuevo] = useState("");
   const [frecuenciaNueva, setFrecuenciaNueva] = useState("diario");
   const [vecesPorSemanaNueva, setVecesPorSemanaNueva] = useState(3);
@@ -64,38 +65,85 @@ function Habitos() {
   const fechasSemana = obtenerFechasSemanaActual();
   const ultimos14Dias = obtenerUltimosNDias(14);
 
-  function agregarHabito(e) {
+  // Cargar hábitos al abrir la página
+  useEffect(() => {
+    cargarHabitos();
+  }, []);
+
+  async function cargarHabitos() {
+    setCargando(true);
+    const { data, error } = await supabase
+      .from("habitos")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando hábitos:", error);
+    } else {
+      setHabitos(data);
+    }
+    setCargando(false);
+  }
+
+  async function agregarHabito(e) {
     e.preventDefault();
     if (nombreNuevo.trim() === "") return;
 
     const nuevoHabito = {
-      id: Date.now(),
+      user_id: usuario.id,
       nombre: nombreNuevo,
       frecuencia: frecuenciaNueva,
-      vecesPorSemana: frecuenciaNueva === "semanal" ? Number(vecesPorSemanaNueva) : null,
-      fechasCompletado: [],
+      veces_por_semana: frecuenciaNueva === "semanal" ? Number(vecesPorSemanaNueva) : null,
+      fechas_completado: [],
     };
 
-    setHabitos([...habitos, nuevoHabito]);
+    const { data, error } = await supabase
+      .from("habitos")
+      .insert(nuevoHabito)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creando hábito:", error);
+      return;
+    }
+
+    setHabitos([...habitos, data]);
     setNombreNuevo("");
     setFrecuenciaNueva("diario");
     setVecesPorSemanaNueva(3);
   }
 
-  function eliminarHabito(id) {
+  async function eliminarHabito(id) {
+    const { error } = await supabase.from("habitos").delete().eq("id", id);
+    if (error) {
+      console.error("Error eliminando hábito:", error);
+      return;
+    }
     setHabitos(habitos.filter((h) => h.id !== id));
   }
 
-  function toggleCompletadoHoy(id) {
+  async function toggleCompletadoHoy(id) {
+    const habito = habitos.find((h) => h.id === id);
+    const yaCompletado = habito.fechas_completado.includes(hoy);
+    const nuevasFechas = yaCompletado
+      ? habito.fechas_completado.filter((f) => f !== hoy)
+      : [...habito.fechas_completado, hoy];
+
+    const { error } = await supabase
+      .from("habitos")
+      .update({ fechas_completado: nuevasFechas })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error actualizando hábito:", error);
+      return;
+    }
+
     setHabitos(
-      habitos.map((h) => {
-        if (h.id !== id) return h;
-        const yaCompletado = h.fechasCompletado.includes(hoy);
-        const nuevasFechas = yaCompletado
-          ? h.fechasCompletado.filter((f) => f !== hoy)
-          : [...h.fechasCompletado, hoy];
-        return { ...h, fechasCompletado: nuevasFechas };
-      })
+      habitos.map((h) =>
+        h.id === id ? { ...h, fechas_completado: nuevasFechas } : h
+      )
     );
   }
 
@@ -104,8 +152,19 @@ function Habitos() {
     setNombreEditado(habito.nombre);
   }
 
-  function guardarEdicion(id) {
+  async function guardarEdicion(id) {
     if (nombreEditado.trim() === "") return;
+
+    const { error } = await supabase
+      .from("habitos")
+      .update({ nombre: nombreEditado })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error editando hábito:", error);
+      return;
+    }
+
     setHabitos(
       habitos.map((h) => (h.id === id ? { ...h, nombre: nombreEditado } : h))
     );
@@ -118,6 +177,10 @@ function Habitos() {
 
   function toggleHistorial(id) {
     setHistorialAbiertoId(historialAbiertoId === id ? null : id);
+  }
+
+  if (cargando) {
+    return <p className="text-slate-400">Cargando hábitos...</p>;
   }
 
   return (
@@ -173,12 +236,12 @@ function Habitos() {
         )}
 
         {habitos.map((habito) => {
-          const completadoHoy = habito.fechasCompletado.includes(hoy);
+          const completadoHoy = habito.fechas_completado.includes(hoy);
           const esSemanal = habito.frecuencia === "semanal";
-          const completadosEstaSemana = habito.fechasCompletado.filter((f) =>
+          const completadosEstaSemana = habito.fechas_completado.filter((f) =>
             fechasSemana.includes(f)
           ).length;
-          const racha = calcularRacha(habito.fechasCompletado);
+          const racha = calcularRacha(habito.fechas_completado);
           const enEdicion = editandoId === habito.id;
           const historialAbierto = historialAbiertoId === habito.id;
 
@@ -231,14 +294,14 @@ function Habitos() {
                       {esSemanal ? (
                         <div className="mt-1">
                           <p className="text-xs text-blue-600 font-medium">
-                            {completadosEstaSemana}/{habito.vecesPorSemana} esta semana
+                            {completadosEstaSemana}/{habito.veces_por_semana} esta semana
                           </p>
                           <div className="w-32 h-1.5 bg-slate-200 rounded-full mt-1 overflow-hidden">
                             <div
                               className="h-full bg-blue-500 rounded-full"
                               style={{
                                 width: `${Math.min(
-                                  (completadosEstaSemana / habito.vecesPorSemana) * 100,
+                                  (completadosEstaSemana / habito.veces_por_semana) * 100,
                                   100
                                 )}%`,
                               }}
@@ -285,7 +348,7 @@ function Habitos() {
                   <p className="text-xs text-slate-400 mb-2">Últimos 14 días</p>
                   <div className="flex gap-1 flex-wrap">
                     {ultimos14Dias.map((fecha) => {
-                      const completado = habito.fechasCompletado.includes(fecha);
+                      const completado = habito.fechas_completado.includes(fecha);
                       const diaNumero = fecha.split("-")[2];
                       return (
                         <div

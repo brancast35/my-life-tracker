@@ -1,5 +1,6 @@
-import { useState } from "react";
-import useLocalStorage from "../hooks/useLocalStorage";
+import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext";
 
 const prioridadStyles = {
   alta: "bg-red-100 text-red-700",
@@ -20,7 +21,9 @@ function formatearFecha(fechaStr) {
 }
 
 function Objetivos() {
-  const [objetivos, setObjetivos] = useLocalStorage("objetivos", []);
+  const { usuario } = useAuth();
+  const [objetivos, setObjetivos] = useState([]);
+  const [cargando, setCargando] = useState(true);
   const [nombreNuevo, setNombreNuevo] = useState("");
   const [fechaNueva, setFechaNueva] = useState("");
   const [prioridadNueva, setPrioridadNueva] = useState("media");
@@ -28,36 +31,79 @@ function Objetivos() {
   const [editandoId, setEditandoId] = useState(null);
   const [nombreEditado, setNombreEditado] = useState("");
 
-  function agregarObjetivo(e) {
+  useEffect(() => {
+    cargarObjetivos();
+  }, []);
+
+  async function cargarObjetivos() {
+    setCargando(true);
+    const { data, error } = await supabase
+      .from("objetivos")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Error cargando objetivos:", error);
+    } else {
+      setObjetivos(data);
+    }
+    setCargando(false);
+  }
+
+  async function agregarObjetivo(e) {
     e.preventDefault();
     if (nombreNuevo.trim() === "") return;
 
     const nuevoObjetivo = {
-      id: Date.now(),
+      user_id: usuario.id,
       nombre: nombreNuevo,
-      fechaLimite: fechaNueva,
+      fecha_limite: fechaNueva || null,
       prioridad: prioridadNueva,
       periodo: periodoNuevo,
       progreso: 0,
     };
 
-    setObjetivos([...objetivos, nuevoObjetivo]);
+    const { data, error } = await supabase
+      .from("objetivos")
+      .insert(nuevoObjetivo)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creando objetivo:", error);
+      return;
+    }
+
+    setObjetivos([...objetivos, data]);
     setNombreNuevo("");
     setFechaNueva("");
     setPrioridadNueva("media");
     setPeriodoNuevo("mensual");
   }
 
-  function eliminarObjetivo(id) {
+  async function eliminarObjetivo(id) {
+    const { error } = await supabase.from("objetivos").delete().eq("id", id);
+    if (error) {
+      console.error("Error eliminando objetivo:", error);
+      return;
+    }
     setObjetivos(objetivos.filter((o) => o.id !== id));
   }
 
-  function actualizarProgreso(id, nuevoProgreso) {
+  async function actualizarProgreso(id, nuevoProgreso) {
+    const progreso = Number(nuevoProgreso);
+
+    // Actualiza la pantalla al instante (mientras se guarda en segundo plano)
     setObjetivos(
-      objetivos.map((o) =>
-        o.id === id ? { ...o, progreso: Number(nuevoProgreso) } : o
-      )
+      objetivos.map((o) => (o.id === id ? { ...o, progreso } : o))
     );
+
+    const { error } = await supabase
+      .from("objetivos")
+      .update({ progreso })
+      .eq("id", id);
+
+    if (error) console.error("Error actualizando progreso:", error);
   }
 
   function iniciarEdicion(objetivo) {
@@ -65,12 +111,27 @@ function Objetivos() {
     setNombreEditado(objetivo.nombre);
   }
 
-  function guardarEdicion(id) {
+  async function guardarEdicion(id) {
     if (nombreEditado.trim() === "") return;
+
+    const { error } = await supabase
+      .from("objetivos")
+      .update({ nombre: nombreEditado })
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error editando objetivo:", error);
+      return;
+    }
+
     setObjetivos(
       objetivos.map((o) => (o.id === id ? { ...o, nombre: nombreEditado } : o))
     );
     setEditandoId(null);
+  }
+
+  if (cargando) {
+    return <p className="text-slate-400">Cargando objetivos...</p>;
   }
 
   return (
@@ -203,7 +264,7 @@ function Objetivos() {
                           {estado.texto}
                         </span>
                         <span className="text-xs text-slate-400">
-                          📅 {formatearFecha(objetivo.fechaLimite)}
+                          📅 {formatearFecha(objetivo.fecha_limite)}
                         </span>
                       </div>
                     </>

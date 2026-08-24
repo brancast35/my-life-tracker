@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
+import Login from "./pages/Login";
 import Sidebar from "./components/Sidebar";
 import MobileNav from "./components/MobileNav";
 import Dashboard from "./pages/Dashboard";
@@ -13,6 +15,19 @@ import Configuracion from "./pages/Configuracion";
 import useDarkMode from "./hooks/useDarkMode";
 function App() {
   const [modoOscuro, alternarModoOscuro] = useDarkMode();
+  const { usuario, cargando } = useAuth();
+
+  if (cargando) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900">
+        <p className="text-slate-400">Cargando...</p>
+      </div>
+    );
+  }
+
+  if (!usuario) {
+    return <Login />;
+  }
 
   return (
     <BrowserRouter>
