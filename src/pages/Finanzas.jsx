@@ -1,5 +1,6 @@
-import { useState } from "react";
-import useLocalStorage from "../hooks/useLocalStorage";
+import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../context/AuthContext";
 
 const categoriasIngreso = ["Salario", "Freelance", "Inversiones", "Otro"];
 const categoriasGasto = ["Comida", "Transporte", "Vivienda", "Ocio", "Salud", "Otro"];
@@ -19,7 +20,10 @@ function formatearMonto(monto) {
 }
 
 function Finanzas() {
-  const [movimientos, setMovimientos] = useLocalStorage("movimientos", []);
+  const { usuario } = useAuth();
+  const [movimientos, setMovimientos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+
   const [tipoNuevo, setTipoNuevo] = useState("gasto");
   const [montoNuevo, setMontoNuevo] = useState("");
   const [categoriaNueva, setCategoriaNueva] = useState(categoriasGasto[0]);
@@ -30,41 +34,83 @@ function Finanzas() {
 
   const categoriasDisponibles = tipoNuevo === "ingreso" ? categoriasIngreso : categoriasGasto;
 
+  // Cargar movimientos desde Supabase al montar el componente
+  useEffect(() => {
+    cargarMovimientos();
+  }, []);
+
+  async function cargarMovimientos() {
+    setCargando(true);
+    const { data, error } = await supabase
+      .from("finanzas")
+      .select("*")
+      .order("fecha", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error al cargar movimientos:", error.message);
+    } else {
+      setMovimientos(data);
+    }
+    setCargando(false);
+  }
+
   function cambiarTipo(nuevoTipo) {
     setTipoNuevo(nuevoTipo);
     setCategoriaNueva(nuevoTipo === "ingreso" ? categoriasIngreso[0] : categoriasGasto[0]);
   }
 
-  function agregarMovimiento(e) {
+  async function agregarMovimiento(e) {
     e.preventDefault();
     if (montoNuevo === "" || Number(montoNuevo) <= 0) return;
 
-    const nuevoMovimiento = {
-      id: Date.now(),
+     const nuevoMovimiento = {
+      user_id: usuario.id,
       tipo: tipoNuevo,
       monto: Number(montoNuevo),
+    
       categoria: categoriaNueva,
       descripcion: descripcionNueva,
-      metodoPago: metodoNuevo,
+      metodo_pago: metodoNuevo,
       fecha: fechaNueva,
     };
 
-    setMovimientos([nuevoMovimiento, ...movimientos]);
+    const { data, error } = await supabase
+      .from("finanzas")
+      .insert(nuevoMovimiento)
+      .select();
+
+    if (error) {
+      console.error("Error al agregar movimiento:", error.message);
+      return;
+    }
+
+    setMovimientos([data[0], ...movimientos]);
     setMontoNuevo("");
     setDescripcionNueva("");
   }
 
-  function eliminarMovimiento(id) {
+  async function eliminarMovimiento(id) {
+    const { error } = await supabase
+      .from("finanzas")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Error al eliminar movimiento:", error.message);
+      return;
+    }
+
     setMovimientos(movimientos.filter((m) => m.id !== id));
   }
 
   const totalIngresos = movimientos
     .filter((m) => m.tipo === "ingreso")
-    .reduce((suma, m) => suma + m.monto, 0);
+    .reduce((suma, m) => suma + Number(m.monto), 0);
 
   const totalGastos = movimientos
     .filter((m) => m.tipo === "gasto")
-    .reduce((suma, m) => suma + m.monto, 0);
+    .reduce((suma, m) => suma + Number(m.monto), 0);
 
   const balance = totalIngresos - totalGastos;
 
@@ -72,6 +118,10 @@ function Finanzas() {
     filtroTipo === "todos"
       ? movimientos
       : movimientos.filter((m) => m.tipo === filtroTipo);
+
+  if (cargando) {
+    return <p className="text-slate-400">Cargando movimientos...</p>;
+  }
 
   return (
     <div>
@@ -223,7 +273,7 @@ function Finanzas() {
                   {mov.descripcion || mov.categoria}
                 </p>
                 <p className="text-xs text-slate-400">
-                  {mov.categoria} · {mov.metodoPago} · {formatearFecha(mov.fecha)}
+                  {mov.categoria} · {mov.metodo_pago} · {formatearFecha(mov.fecha)}
                 </p>
               </div>
             </div>
